@@ -152,18 +152,35 @@ function App() {
   }
 
   // Ollama API Call
-  const chatWithOllama = async (userMessage, targetLangName) => {
+  const chatWithOllama = async (userMessage, targetLangName, targetLangCode) => {
     try {
-      const systemPrompt = `You are a helpful multilingual assistant. The user is practicing ${targetLangName}. 
-Reply naturally in ${targetLangName}. Keep responses concise (1-2 sentences). 
-Be friendly and conversational. If the user writes in another language, understand it but reply in ${targetLangName}.`
+      // Get language-specific examples for better guidance
+      const langExamples = {
+        'Japanese': 'For example: "こんにちは！元気ですか？" or "今日は何をしましたか？"',
+        'Chinese (Traditional)': 'For example: "你好！今天過得怎麼樣？" or "很高興認識你！"',
+        'English': 'For example: "Hello! How are you doing today?" or "That sounds interesting!"'
+      }
+      
+      const systemPrompt = `CRITICAL INSTRUCTION: You MUST reply ONLY in ${targetLangName}. 
+This is non-negotiable - every single word of your response must be in ${targetLangName}.
+
+${langExamples[targetLangName] || ''}
+
+Rules:
+1. ALWAYS respond in ${targetLangName} - no exceptions
+2. Even if the user writes in a different language, you MUST reply in ${targetLangName}
+3. Keep responses concise (1-2 sentences)
+4. Be friendly and conversational
+5. Do NOT mix languages - use ONLY ${targetLangName}
+
+You are a language practice partner helping someone learn ${targetLangName}.`
 
       const response = await fetch('http://localhost:11434/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'llama3.2',
-          prompt: userMessage,
+          model: ollamaModel || 'llama3.2',
+          prompt: `[User message in another language, please respond in ${targetLangName} ONLY]: ${userMessage}`,
           system: systemPrompt,
           stream: false
         })
@@ -196,7 +213,7 @@ Be friendly and conversational. If the user writes in another language, understa
     
     // --- AI Bot Logic ---
     // 1. First, try to get AI response from Ollama
-    let botReply = await chatWithOllama(textToSend, targetLangName)
+    let botReply = await chatWithOllama(textToSend, targetLangName, targetLang)
     
     // 2. If Ollama fails, fallback to translation mode
     if (!botReply) {
