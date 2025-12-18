@@ -210,9 +210,17 @@ function App() {
             </select>
           </div>
           
-          <div className="icon">
+          <button 
+            className="btn btn-icon" 
+            onClick={() => {
+              setSourceLang(targetLang)
+              setTargetLang(sourceLang)
+            }}
+            title="Swap Languages"
+            style={{width: '40px', height: '40px', borderRadius: '50%', padding: 0}}
+          >
              <Icons.Exchange />
-          </div>
+          </button>
 
           <div style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
             <span style={{color:'var(--color-text-muted)', fontSize:'0.9rem'}}>BOT REPLIES</span>
