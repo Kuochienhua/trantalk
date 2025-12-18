@@ -38,7 +38,37 @@ function App() {
   const [inputText, setInputText] = useState('')
   const [isListening, setIsListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
+  const [ollamaStatus, setOllamaStatus] = useState('checking') // 'checking' | 'connected' | 'disconnected'
+  const [ollamaModel, setOllamaModel] = useState('')
   const messagesEndRef = useRef(null)
+
+  // Check Ollama connection on mount
+  useEffect(() => {
+    const checkOllama = async () => {
+      try {
+        const response = await fetch('http://localhost:11434/api/tags')
+        if (response.ok) {
+          const data = await response.json()
+          if (data.models && data.models.length > 0) {
+            setOllamaStatus('connected')
+            setOllamaModel(data.models[0].name)
+          } else {
+            setOllamaStatus('disconnected')
+          }
+        } else {
+          setOllamaStatus('disconnected')
+        }
+      } catch (error) {
+        console.error('Ollama check failed:', error)
+        setOllamaStatus('disconnected')
+      }
+    }
+    
+    checkOllama()
+    // Re-check every 30 seconds
+    const interval = setInterval(checkOllama, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Auto-scroll
   useEffect(() => {
@@ -202,6 +232,40 @@ Be friendly and conversational. If the user writes in another language, understa
 
   return (
     <div className="app-wrapper">
+      {/* Ollama Status Bar */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: '0.5rem',
+        padding: '0.5rem 1rem',
+        marginBottom: '0.5rem',
+        background: ollamaStatus === 'connected' ? 'rgba(34, 197, 94, 0.2)' : 
+                    ollamaStatus === 'disconnected' ? 'rgba(239, 68, 68, 0.2)' : 
+                    'rgba(234, 179, 8, 0.2)',
+        borderRadius: '12px',
+        border: `1px solid ${ollamaStatus === 'connected' ? 'rgba(34, 197, 94, 0.5)' : 
+                             ollamaStatus === 'disconnected' ? 'rgba(239, 68, 68, 0.5)' : 
+                             'rgba(234, 179, 8, 0.5)'}`,
+        fontSize: '0.85rem'
+      }}>
+        <div style={{
+          width: '10px',
+          height: '10px',
+          borderRadius: '50%',
+          background: ollamaStatus === 'connected' ? '#22c55e' : 
+                      ollamaStatus === 'disconnected' ? '#ef4444' : '#eab308',
+          animation: ollamaStatus === 'checking' ? 'pulse 1.5s infinite' : 
+                     ollamaStatus === 'connected' ? 'none' : 'none',
+          boxShadow: ollamaStatus === 'connected' ? '0 0 8px #22c55e' : 'none'
+        }} />
+        <span style={{color: 'var(--color-text)'}}>
+          {ollamaStatus === 'connected' && `🤖 Ollama AI Connected (${ollamaModel})`}
+          {ollamaStatus === 'disconnected' && '❌ Ollama AI Disconnected - Using Fallback Mode'}
+          {ollamaStatus === 'checking' && '🔄 Checking Ollama Connection...'}
+        </span>
+      </div>
+
       {/* Header with Language Selectors */}
       <div className="header glass-panel">
         <div style={{display:'flex', alignItems:'center', gap:'1rem', flexWrap: 'wrap', justifyContent:'center'}}>
