@@ -121,6 +121,37 @@ function App() {
     }
   }
 
+  // Ollama API Call
+  const chatWithOllama = async (userMessage, targetLangName) => {
+    try {
+      const systemPrompt = `You are a helpful multilingual assistant. The user is practicing ${targetLangName}. 
+Reply naturally in ${targetLangName}. Keep responses concise (1-2 sentences). 
+Be friendly and conversational. If the user writes in another language, understand it but reply in ${targetLangName}.`
+
+      const response = await fetch('http://localhost:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3.2',
+          prompt: userMessage,
+          system: systemPrompt,
+          stream: false
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error('Ollama request failed')
+      }
+      
+      const data = await response.json()
+      return data.response
+    } catch (error) {
+      console.error('Ollama error:', error)
+      // Fallback to translation-only mode
+      return null
+    }
+  }
+
   const handleSend = async (manualText) => {
     const textToSend = manualText || inputText
     if (!textToSend.trim()) return
@@ -130,60 +161,36 @@ function App() {
     setMessages(prev => [...prev, newUserMsg])
     setInputText('')
 
-    // --- Bot Logic ---
-    // 1. Translate User Input to Target (So the bot 'understands' and replies in target language context, 
-    //    or simply we translate the interaction)
+    // Get target language name for Ollama prompt
+    const targetLangName = LANGUAGES.find(l => l.code === targetLang)?.name || 'English'
     
-    // The user wants: "I ask, bot answers in the OTHER language".
-    // Scenario 1: User says "Hello" (EN). Bot answers "Konnichiwa" (JP)?? No, that's translation.
-    // Scenario 2: User says "Hello" (EN). Bot answers "Genki desu ka?" (JP) (Meaningful conversation).
+    // --- AI Bot Logic ---
+    // 1. First, try to get AI response from Ollama
+    let botReply = await chatWithOllama(textToSend, targetLangName)
     
-    // Since I don't have a Chat LLM, I will simulate a "Translate + Echo/Response" behavior.
-    // "I heard: [translated text]" is the safest demo.
-    // Let's try to make it slightly chatty using a template.
-    
-    const translatedInput = await translateText(textToSend, sourceLang, targetLang)
-    
-    // Simulated Responses in Target Language
-    // We need to translate the *Templates* to the target language to be authentic.
-    // Or we can just reply with the translated input as a "Translation App" mode 
-    // BUT the prompt says "Robot automatic answer... daily conversation".
-    // I'll try to generate a generic response in English then translate it to Target.
-    
-    const genericResponses = [
+    // 2. If Ollama fails, fallback to translation mode
+    if (!botReply) {
+      const translatedInput = await translateText(textToSend, sourceLang, targetLang)
+      const fallbackResponses = [
         "That is very interesting.",
         "I understand, please tell me more.",
         "Could you explain that in detail?",
-        "I am learning this language too.",
-        "That's a good point.",
-        "Really?",
-        "Nice to meet you."
-    ]
-    const randomTemplate = genericResponses[Math.floor(Math.random() * genericResponses.length)]
-    
-    // Translate the template to target language
-    // Note: If target is English, we don't need to translate.
-    let botReply = randomTemplate
-    if (!targetLang.startsWith('en')) {
-         botReply = await translateText(randomTemplate, 'en-US', targetLang)
+        "That's a good point."
+      ]
+      const randomFallback = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)]
+      
+      if (!targetLang.startsWith('en')) {
+        botReply = await translateText(randomFallback, 'en-US', targetLang)
+      } else {
+        botReply = randomFallback
+      }
+      botReply = `${translatedInput}? ${botReply}`
     }
-
-    // Combine: "Replying to: [Translated Input]. [Bot Reply]"
-    // Actually, let's just send the Bot Reply to keep it conversational.
-    // Or maybe just the translated input if it's a translation tool? 
-    // "Develop an app that translates... I ask, robot answers in other language". 
-    // It's ambiguous if it's a Translator or a Chatbot. "Daily conversation" implies Chatbot.
-    // I'll stick to the "Chatbot" simulation.
-    
-    // Logic: Bot echoes the translated text + a conversational filler.
-    // Example: User: "Hello", Bot (JP): "Konbanwa. (Hello)"
-    
-    // If translation fails (returns same text), we might look silly, but it's a demo.
     
     const newBotMsg = { 
         id: Date.now() + 1, 
         sender: 'bot', 
-        text: `${translatedInput}? ${botReply}`, // Echoing as a question + reply
+        text: botReply,
         lang: targetLang 
     }
     
@@ -194,9 +201,9 @@ function App() {
   }
 
   return (
-    <div className="app-container">
-      {/* Header */}
-      <div className="header glass-panel" style={{position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)', width: '90%', maxWidth: '1000px', height: 'auto', justifyContent: 'center', gap: '2rem'}}>
+    <div className="app-wrapper">
+      {/* Header with Language Selectors */}
+      <div className="header glass-panel">
         <div style={{display:'flex', alignItems:'center', gap:'1rem', flexWrap: 'wrap', justifyContent:'center'}}>
           <div style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
             <span style={{color:'var(--color-text-muted)', fontSize:'0.9rem'}}>YOU SPEAK</span>
@@ -237,7 +244,7 @@ function App() {
       </div>
 
       {/* Main Split View */}
-      <div className="split-view" style={{marginTop: '100px'}}>
+      <div className="split-view">
         
         {/* Left: User Panel */}
         <div className="panel glass-panel">
