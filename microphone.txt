@@ -1,0 +1,114 @@
+﻿在 Windows 環境下開發 Electron 應用程式時，取得麥克風權限的流程其實分為兩層關卡：「作業系統層 (Windows)」 與 「應用程式層 (Electron)」。
+Windows 不像手機 (iOS/Android) 或 macOS 會自動彈出一個漂亮的系統對話框問使用者「是否允許此程式使用麥克風」。在 Windows 上，您通常需要主動檢查權限狀態，並引導使用者去系統設定開啟。
+以下是完整的實作流程與程式碼範例：
+第一步：在主進程 (Main Process) 檢查與處理權限
+在 main.js (或 index.js) 中，您需要做兩件事：
+1. 回應渲染進程的請求：當網頁端呼叫麥克風時，告訴 Electron 核心「同意」。
+2. 檢查 Windows 系統設定：確認使用者有沒有在 Windows 設定中把麥克風關掉。
+
+
+JavaScript
+
+
+
+
+const { app, BrowserWindow, session, systemPreferences, shell } = require('electron')
+
+function createWindow() {
+ const win = new BrowserWindow({ width: 800, height: 600 })
+ win.loadURL('index.html') 
+}
+
+app.whenReady().then(() => {
+ createWindow()
+
+ // 1. 【關鍵】處理來自網頁 (Renderer) 的權限請求
+ // 如果沒有這段，網頁呼叫 getUserMedia 時會失敗或沒反應
+ session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+   if (permission === 'media') {
+     // 在這裡自動同意 Electron 內部的權限請求
+     callback(true) 
+   } else {
+     callback(false)
+   }
+ })
+
+ // 2. 檢查 Windows 系統層級的麥克風權限狀態
+ checkSystemMicPermission()
+})
+
+async function checkSystemMicPermission() {
+ // getMediaAccessStatus 支援 Windows 10/11 與 macOS
+ const status = systemPreferences.getMediaAccessStatus('microphone')
+ 
+ console.log('目前系統麥克風權限狀態:', status)
+
+ if (status === 'not-determined') {
+   // Windows 通常不會是這個狀態，macOS 比較常見
+ } else if (status === 'denied' || status === 'restricted') {
+   // ★★★ 如果系統權限被拒，這裡應該彈窗通知使用者 ★★★
+   console.log('麥克風被 Windows 系統封鎖！')
+   
+   // 您可以使用 dialog 模組提示使用者，並提供按鈕讓他們打開設定
+   const { dialog } = require('electron')
+   const choice = await dialog.showMessageBox({
+     type: 'warning',
+     buttons: ['開啟系統設定', '取消'],
+     title: '麥克風權限受阻',
+     message: '您的 Windows 隱私權設定封鎖了麥克風存取，請手動開啟。',
+     detail: '請前往「隱私權與安全性 > 麥克風」開啟權限。'
+   })
+
+   if (choice.response === 0) {
+     // 直接幫使用者打開 Windows 的麥克風設定頁面
+     await shell.openExternal('ms-settings:privacy-microphone')
+   }
+ } else {
+   console.log('Windows 系統允許存取麥克風，可以開始錄音。')
+ }
+}
+
+第二步：在渲染進程 (Renderer Process) 觸發麥克風
+在前端介面 (Vue/React/HTML) 嘗試啟動麥克風。這是真正觸發權限檢查的動作。
+
+
+JavaScript
+
+
+
+
+// Renderer.js 或前端組件內
+async function startMicrophone() {
+ try {
+   // 這行會觸發 Main Process 的 setPermissionRequestHandler
+   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+   
+   console.log("麥克風啟動成功！");
+   // 將聲音串流綁定到 audio 標籤或是進行處理
+   // const audio = document.querySelector('audio');
+   // audio.srcObject = stream;
+   
+ } catch (err) {
+   console.error("無法取得麥克風:", err);
+   
+   if (err.name === 'NotAllowedError') {
+     alert("存取被拒絕：請檢查 Windows 隱私權設定是否允許傳統型應用程式存取麥克風。");
+   } else if (err.name === 'NotFoundError') {
+     alert("找不到麥克風裝置：請檢查是否已插入麥克風。");
+   } else {
+     alert("發生錯誤：" + err.message);
+   }
+ }
+}
+
+重點總結與常見坑
+1. 權限處理器 (setPermissionRequestHandler) 是必須的：
+Electron 為了安全性，預設不會隨便讓網頁存取硬體。如果您沒有在 Main Process 寫這段 callback(true)，前端的 getUserMedia 會一直報錯或卡住。
+2. ms-settings: URI Scheme：
+為了提升使用者體驗，當偵測到權限不足時，使用 shell.openExternal('ms-settings:privacy-microphone') 直接幫使用者打開設定頁面是非常專業的做法。
+3. 開發環境 vs 生產環境：
+   * 開發時 (electron .)：Windows 認為您是 "Electron.exe"，權限紀錄掛在 Electron 名下。
+   * 打包後 (your-app.exe)：Windows 認為您是 "YourAppName.exe"。
+   * 注意：如果您在開發時手動關閉了權限，打包後可能因為應用程式名稱變了，權限會重置（變成可用），反之亦然。
+   4. 確保 package.json 設定正確：
+雖然這是主要針對 macOS，但保持良好習慣，確認 package.json 裡面的 name 和 productName 是您想要的名稱，這樣 Windows 音量混音程式和隱私權設定裡顯示的名字才會正確。

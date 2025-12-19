@@ -19,7 +19,7 @@ const Icons = {
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
   ),
   Exchange: () => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16"/></svg>
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16" /></svg>
   ),
   Bot: () => (
     <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg>
@@ -63,7 +63,7 @@ function App() {
         setOllamaStatus('disconnected')
       }
     }
-    
+
     checkOllama()
     // Re-check every 30 seconds
     const interval = setInterval(checkOllama, 30000)
@@ -88,9 +88,9 @@ function App() {
       if (data.responseStatus === 200) {
         return data.responseData.translatedText
       } else {
-         // Fallback or error
-         console.warn("Translation API limit or error", data)
-         return text // Return original if failed
+        // Fallback or error
+        console.warn("Translation API limit or error", data)
+        return text // Return original if failed
       }
     } catch (error) {
       console.error("Translation error", error)
@@ -102,48 +102,90 @@ function App() {
   const speak = (text, lang) => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel()
-      
+
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.lang = lang
-      
+
       const voices = window.speechSynthesis.getVoices()
       // Try to match exact, then prefix
       let voice = voices.find(v => v.lang === lang)
       if (!voice) voice = voices.find(v => v.lang.startsWith(lang.split('-')[0]))
-      
+
       if (voice) utterance.voice = voice
 
       utterance.onstart = () => setIsSpeaking(true)
       utterance.onend = () => setIsSpeaking(false)
       utterance.onerror = () => setIsSpeaking(false)
-      
+
       window.speechSynthesis.speak(utterance)
     }
   }
 
   // STT
+  const silenceTimer = useRef(null)
+  const shouldListenRef = useRef(false)
+
   const toggleListening = () => {
     if (isListening) {
+      shouldListenRef.current = false
       setIsListening(false)
+      if (silenceTimer.current) clearTimeout(silenceTimer.current)
       window.recognition?.stop()
     } else {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition()
         recognition.lang = sourceLang
-        recognition.continuous = false
-        recognition.interimResults = false
-        
+        recognition.continuous = true
+        recognition.interimResults = true
+
         window.recognition = recognition
+        shouldListenRef.current = true
 
         recognition.onstart = () => setIsListening(true)
-        recognition.onend = () => setIsListening(false)
-        recognition.onresult = (event) => {
-          const transcript = event.results[0][0].transcript
-          setInputText(transcript)
-          handleSend(transcript)
+
+        recognition.onend = () => {
+          if (shouldListenRef.current) {
+            try {
+              recognition.start()
+            } catch (e) {
+              console.error("Restart failed", e)
+              setIsListening(false)
+              shouldListenRef.current = false
+            }
+          } else {
+            setIsListening(false)
+            if (silenceTimer.current) clearTimeout(silenceTimer.current)
+          }
         }
-        
+
+        recognition.onerror = (event) => {
+          console.error("STT Error", event.error)
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            shouldListenRef.current = false
+            setIsListening(false)
+            alert("Microphone access denied.")
+          }
+        }
+
+        recognition.onresult = (event) => {
+          if (silenceTimer.current) clearTimeout(silenceTimer.current)
+
+          let fullTranscript = ''
+          for (let i = 0; i < event.results.length; i++) {
+            fullTranscript += event.results[i][0].transcript
+          }
+
+          setInputText(fullTranscript)
+
+          // Auto-send after 3 seconds of silence
+          silenceTimer.current = setTimeout(() => {
+            shouldListenRef.current = false
+            recognition.stop()
+            handleSend(fullTranscript)
+          }, 3000)
+        }
+
         recognition.start()
       } else {
         alert("Browser does not support Speech Recognition. Please use Chrome/Edge.")
@@ -160,7 +202,7 @@ function App() {
         'Chinese (Traditional)': 'For example: "你好！今天過得怎麼樣？" or "很高興認識你！"',
         'English': 'For example: "Hello! How are you doing today?" or "That sounds interesting!"'
       }
-      
+
       const systemPrompt = `CRITICAL INSTRUCTION: You MUST reply ONLY in ${targetLangName}. 
 This is non-negotiable - every single word of your response must be in ${targetLangName}.
 
@@ -185,11 +227,11 @@ You are a language practice partner helping someone learn ${targetLangName}.`
           stream: false
         })
       })
-      
+
       if (!response.ok) {
         throw new Error('Ollama request failed')
       }
-      
+
       const data = await response.json()
       return data.response
     } catch (error) {
@@ -202,7 +244,7 @@ You are a language practice partner helping someone learn ${targetLangName}.`
   const handleSend = async (manualText) => {
     const textToSend = manualText || inputText
     if (!textToSend.trim()) return
-    
+
     // Add User Message
     const newUserMsg = { id: Date.now(), sender: 'user', text: textToSend, lang: sourceLang }
     setMessages(prev => [...prev, newUserMsg])
@@ -210,11 +252,11 @@ You are a language practice partner helping someone learn ${targetLangName}.`
 
     // Get target language name for Ollama prompt
     const targetLangName = LANGUAGES.find(l => l.code === targetLang)?.name || 'English'
-    
+
     // --- AI Bot Logic ---
     // 1. First, try to get AI response from Ollama
     let botReply = await chatWithOllama(textToSend, targetLangName, targetLang)
-    
+
     // 2. If Ollama fails, fallback to translation mode
     if (!botReply) {
       const translatedInput = await translateText(textToSend, sourceLang, targetLang)
@@ -225,7 +267,7 @@ You are a language practice partner helping someone learn ${targetLangName}.`
         "That's a good point."
       ]
       const randomFallback = fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)]
-      
+
       if (!targetLang.startsWith('en')) {
         botReply = await translateText(randomFallback, 'en-US', targetLang)
       } else {
@@ -233,16 +275,16 @@ You are a language practice partner helping someone learn ${targetLangName}.`
       }
       botReply = `${translatedInput}? ${botReply}`
     }
-    
-    const newBotMsg = { 
-        id: Date.now() + 1, 
-        sender: 'bot', 
-        text: botReply,
-        lang: targetLang 
+
+    const newBotMsg = {
+      id: Date.now() + 1,
+      sender: 'bot',
+      text: botReply,
+      lang: targetLang
     }
-    
+
     setMessages(prev => [...prev, newBotMsg])
-    
+
     // Speak
     speak(newBotMsg.text, targetLang)
   }
@@ -257,26 +299,26 @@ You are a language practice partner helping someone learn ${targetLangName}.`
         gap: '0.5rem',
         padding: '0.5rem 1rem',
         marginBottom: '0.5rem',
-        background: ollamaStatus === 'connected' ? 'rgba(34, 197, 94, 0.2)' : 
-                    ollamaStatus === 'disconnected' ? 'rgba(239, 68, 68, 0.2)' : 
-                    'rgba(234, 179, 8, 0.2)',
+        background: ollamaStatus === 'connected' ? 'rgba(34, 197, 94, 0.2)' :
+          ollamaStatus === 'disconnected' ? 'rgba(239, 68, 68, 0.2)' :
+            'rgba(234, 179, 8, 0.2)',
         borderRadius: '12px',
-        border: `1px solid ${ollamaStatus === 'connected' ? 'rgba(34, 197, 94, 0.5)' : 
-                             ollamaStatus === 'disconnected' ? 'rgba(239, 68, 68, 0.5)' : 
-                             'rgba(234, 179, 8, 0.5)'}`,
+        border: `1px solid ${ollamaStatus === 'connected' ? 'rgba(34, 197, 94, 0.5)' :
+          ollamaStatus === 'disconnected' ? 'rgba(239, 68, 68, 0.5)' :
+            'rgba(234, 179, 8, 0.5)'}`,
         fontSize: '0.85rem'
       }}>
         <div style={{
           width: '10px',
           height: '10px',
           borderRadius: '50%',
-          background: ollamaStatus === 'connected' ? '#22c55e' : 
-                      ollamaStatus === 'disconnected' ? '#ef4444' : '#eab308',
-          animation: ollamaStatus === 'checking' ? 'pulse 1.5s infinite' : 
-                     ollamaStatus === 'connected' ? 'none' : 'none',
+          background: ollamaStatus === 'connected' ? '#22c55e' :
+            ollamaStatus === 'disconnected' ? '#ef4444' : '#eab308',
+          animation: ollamaStatus === 'checking' ? 'pulse 1.5s infinite' :
+            ollamaStatus === 'connected' ? 'none' : 'none',
           boxShadow: ollamaStatus === 'connected' ? '0 0 8px #22c55e' : 'none'
         }} />
-        <span style={{color: 'var(--color-text)'}}>
+        <span style={{ color: 'var(--color-text)' }}>
           {ollamaStatus === 'connected' && `🤖 Ollama AI Connected (${ollamaModel})`}
           {ollamaStatus === 'disconnected' && '❌ Ollama AI Disconnected - Using Fallback Mode'}
           {ollamaStatus === 'checking' && '🔄 Checking Ollama Connection...'}
@@ -285,40 +327,40 @@ You are a language practice partner helping someone learn ${targetLangName}.`
 
       {/* Header with Language Selectors */}
       <div className="header glass-panel">
-        <div style={{display:'flex', alignItems:'center', gap:'1rem', flexWrap: 'wrap', justifyContent:'center'}}>
-          <div style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
-            <span style={{color:'var(--color-text-muted)', fontSize:'0.9rem'}}>YOU SPEAK</span>
-            <select 
-                value={sourceLang} 
-                onChange={(e) => setSourceLang(e.target.value)}
-                className="btn"
-                style={{background:'rgba(255,255,255,0.1)', padding: '0.5rem 1rem'}}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>YOU SPEAK</span>
+            <select
+              value={sourceLang}
+              onChange={(e) => setSourceLang(e.target.value)}
+              className="btn"
+              style={{ background: 'rgba(255,255,255,0.1)', padding: '0.5rem 1rem' }}
             >
-                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+              {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
             </select>
           </div>
-          
-          <button 
-            className="btn btn-icon" 
+
+          <button
+            className="btn btn-icon"
             onClick={() => {
               setSourceLang(targetLang)
               setTargetLang(sourceLang)
             }}
             title="Swap Languages"
-            style={{width: '40px', height: '40px', borderRadius: '50%', padding: 0}}
+            style={{ width: '40px', height: '40px', borderRadius: '50%', padding: 0 }}
           >
-             <Icons.Exchange />
+            <Icons.Exchange />
           </button>
 
-          <div style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
-            <span style={{color:'var(--color-text-muted)', fontSize:'0.9rem'}}>BOT REPLIES</span>
-            <select 
-                value={targetLang} 
-                onChange={(e) => setTargetLang(e.target.value)}
-                className="btn"
-                style={{background:'rgba(255,255,255,0.1)', padding: '0.5rem 1rem'}}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>BOT REPLIES</span>
+            <select
+              value={targetLang}
+              onChange={(e) => setTargetLang(e.target.value)}
+              className="btn"
+              style={{ background: 'rgba(255,255,255,0.1)', padding: '0.5rem 1rem' }}
             >
-                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+              {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
             </select>
           </div>
         </div>
@@ -326,71 +368,75 @@ You are a language practice partner helping someone learn ${targetLangName}.`
 
       {/* Main Split View */}
       <div className="split-view">
-        
+
         {/* Left: User Panel */}
         <div className="panel glass-panel">
-           <div className="panel-header">
-              <div className="panel-title">
-                <Icons.User />
-                You ({LANGUAGES.find(l=>l.code===sourceLang)?.name})
-              </div>
-           </div>
-           
-           <div className="chat-area">
-             {messages.filter(m => m.sender === 'user').map(msg => (
-               <div key={msg.id} className="message user">
-                 {msg.text}
-               </div>
-             ))}
-             <div ref={messagesEndRef} />
-           </div>
+          <div className="panel-header">
+            <div className="panel-title">
+              <Icons.User />
+              You ({LANGUAGES.find(l => l.code === sourceLang)?.name})
+            </div>
+          </div>
 
-           <div className="controls">
-             <button 
-                className={`btn btn-icon ${isListening ? 'listening' : ''}`} 
-                onClick={toggleListening}
-                style={{
-                    background: isListening ? '#ef4444' : undefined,
-                    animation: isListening ? 'pulse 1.5s infinite' : 'none'
-                }}
-             >
-               {isListening ? <Icons.MicOff /> : <Icons.Mic />}
-             </button>
-             <input 
-               className="input-field" 
-               placeholder="Type or speak..." 
-               value={inputText}
-               onChange={(e) => setInputText(e.target.value)}
-               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-             />
-             <button className="btn btn-icon" onClick={() => handleSend()}>
-               <Icons.Send />
-             </button>
-           </div>
+          <div className="chat-area">
+            {messages.filter(m => m.sender === 'user').map(msg => (
+              <div key={msg.id} className="message user">
+                {msg.text}
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="controls">
+            <button
+              className={`btn btn-icon ${isListening ? 'listening' : ''}`}
+              onClick={toggleListening}
+              style={{
+                background: isListening ? '#ef4444' : undefined,
+                animation: isListening ? 'pulse 1.5s infinite' : 'none'
+              }}
+            >
+              {isListening ? <Icons.MicOff /> : <Icons.Mic />}
+            </button>
+            <input
+              className="input-field"
+              placeholder="Type or speak..."
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                  handleSend()
+                }
+              }}
+            />
+            <button className="btn btn-icon" onClick={() => handleSend()}>
+              <Icons.Send />
+            </button>
+          </div>
         </div>
 
         {/* Right: Bot Panel */}
-        <div className="panel glass-panel" style={{background: 'rgba(20, 30, 50, 0.8)'}}>
-           <div className="panel-header">
-              <div className="panel-title">
-                <Icons.Bot />
-                Bot ({LANGUAGES.find(l=>l.code===targetLang)?.name})
-              </div>
-              {isSpeaking && <div className="typing-indicator"><span></span><span></span><span></span></div>}
-           </div>
+        <div className="panel glass-panel" style={{ background: 'rgba(20, 30, 50, 0.8)' }}>
+          <div className="panel-header">
+            <div className="panel-title">
+              <Icons.Bot />
+              Bot ({LANGUAGES.find(l => l.code === targetLang)?.name})
+            </div>
+            {isSpeaking && <div className="typing-indicator"><span></span><span></span><span></span></div>}
+          </div>
 
-           <div className="chat-area">
-             {messages.filter(m => m.sender === 'bot').map(msg => (
-               <div key={msg.id} className="message bot" onClick={() => speak(msg.text, msg.lang)} style={{cursor: 'pointer'}}>
-                 <div style={{fontSize: '0.8rem', opacity: 0.7, marginBottom: '4px'}}>Click to Replay</div>
-                 {msg.text}
-               </div>
-             ))}
-           </div>
+          <div className="chat-area">
+            {messages.filter(m => m.sender === 'bot').map(msg => (
+              <div key={msg.id} className="message bot" onClick={() => speak(msg.text, msg.lang)} style={{ cursor: 'pointer' }}>
+                <div style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '4px' }}>Click to Replay</div>
+                {msg.text}
+              </div>
+            ))}
+          </div>
         </div>
 
       </div>
-      
+
       <style>{`
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
